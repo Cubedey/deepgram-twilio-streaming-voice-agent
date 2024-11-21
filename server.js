@@ -5,6 +5,9 @@ const path = require("path");
 const dotenv = require("dotenv");
 dotenv.config();
 
+
+console.log(process.env.DEEPGRAM_API_KEY)
+let total_transcript=""
 // Twilio
 const HttpDispatcher = require("httpdispatcher");
 const WebSocketServer = require("websocket").server;
@@ -24,13 +27,15 @@ const { createClient, LiveTranscriptionEvents } = require("@deepgram/sdk");
 const deepgramClient = createClient(process.env.DEEPGRAM_API_KEY);
 let keepAlive;
 
+
 // OpenAI
 const OpenAI = require('openai');
 const openai = new OpenAI();
 
+
 // Deepgram Text to Speech Websocket
 const WebSocket = require('ws');
-const deepgramTTSWebsocketURL = 'wss://api.deepgram.com/v1/speak?encoding=mulaw&sample_rate=8000&container=none';
+const deepgramTTSWebsocketURL = 'wss://api.deepgram.com/v1/speak?model=aura-luna-en&encoding=mulaw&sample_rate=8000';
 
 // Performance Timings
 let llmStart = 0;
@@ -112,16 +117,18 @@ class MediaStream {
         if (!this.hasSeenMedia) {
           console.log("twilio: Media event received: ", data);
           console.log("twilio: Suppressing additional messages...");
+          //Say hello
           this.hasSeenMedia = true;
         }
         if (!streamSid) {
-          console.log('twilio: streamSid=', streamSid);
           streamSid = data.streamSid;
+          console.log('twilio: streamSid=', streamSid);
         }
         if (data.media.track == "inbound") {
           let rawAudio = Buffer.from(data.media.payload, 'base64');
           this.deepgram.send(rawAudio);
         }
+
       }
       if (data.event === "mark") {
         console.log("twilio: Mark event received", data);
@@ -146,12 +153,38 @@ class MediaStream {
 */
 async function promptLLM(mediaStream, prompt) {
   const stream = openai.beta.chat.completions.stream({
-    model: 'gpt-3.5-turbo',
+    model: 'gpt-4o-mini',
     stream: true,
+    presence_penalty: 1.2,
+    frequency_penalty: 1.4,
     messages: [
       {
         role: 'assistant',
-        content: `You are funny, everything is a joke to you.`
+        content: `
+            You are a lawyer's receptionist.
+            You work for "Caseflood Lawfirm".
+            Your lawfirm has these employees: "Ethan, Tolen, and Ayushman".
+            Your firm practices: "Personal Injury".
+            Important Guidelines:
+            Very important: Do not repeat yourself!! Do not keep saying Im sorry to hear that. Do not say thank you for the information twice! Saying it once is enough. Do not repeat questions if they have been answered.
+            Keep responses short, and concise.
+            Be positive, supportive, friendly, and empathetic to the caller in your resposes.
+            Be very smart, helpful and intellectual about the law like you are a real lawyer.
+            Ask only one question at a time. Do not overwhelm the caller with multiple questions.
+            Do not assume the caller wants to tranfer unless they specifically ask to transfer to another lawyer.  
+
+            Your goal is to:
+            First, figure out whether the caller is calling for a legal matter. If not, act as a regular receptionist and ignore all other instructions past this point.
+            Second, figure out if the area of law the case relates to is one of these: "Personal Injury".
+            Third, qualify the client by inquiring very deeply about their case, but do not pester them with confirmation questions. Ask follow up questions and get as much pertinent information as possible. 
+            Fourth, acquire the caller's contact information like their name, email, and phone number. Ask no more than twice if they say no initially.
+            
+            Make sure that you thank them for calling and giving this very helpful information. Reassure the lawyers will do their best to help with the case and that they value the client. 
+            If you have acquired all the information you need and the caller does not have any more questions and doesn't wait say "Goodbye".
+            Do not comment on the validity/strength of their case or whether it's likely the law firm will take it.
+            You cannot hold the call or schedule appointments.
+            If you are going to refer someone to a lawyer, refer them to one of your fellow employees.
+            `
       },
       {
         role: 'user',
@@ -159,7 +192,7 @@ async function promptLLM(mediaStream, prompt) {
       }
     ],
   });
-
+  total_transcript+="\n "
   speaking = true;
   let firstToken = true;
   for await (const chunk of stream) {
@@ -175,6 +208,7 @@ async function promptLLM(mediaStream, prompt) {
       chunk_message = chunk.choices[0].delta.content;
       if (chunk_message) {
         process.stdout.write(chunk_message)
+        total_transcript+=chunk_message
         if (!send_first_sentence_input_time && containsAnyChars(chunk_message)){
           send_first_sentence_input_time = Date.now();
         }
@@ -207,6 +241,7 @@ const setupDeepgramWebsocket = (mediaStream) => {
 
   ws.on('open', function open() {
     console.log('deepgram TTS: Connected');
+
   });
 
   ws.on('message', function incoming(data) {
@@ -240,6 +275,7 @@ const setupDeepgramWebsocket = (mediaStream) => {
 
       // console.log('\ndeepgram TTS: Sending data.length:', data.length);
       mediaStream.connection.sendUTF(messageJSON);
+      
     }
   });
 
@@ -284,8 +320,9 @@ const setupDeepgram = (mediaStream) => {
 
   deepgram.addListener(LiveTranscriptionEvents.Open, async () => {
     console.log("deepgram STT: Connected");
-
+   
     deepgram.addListener(LiveTranscriptionEvents.Transcript, (data) => {
+
       const transcript = data.channel.alternatives[0].transcript;
       if (transcript !== "") {
         if (data.is_final) {
@@ -295,7 +332,8 @@ const setupDeepgram = (mediaStream) => {
             is_finals = [];
             console.log(`deepgram STT: [Speech Final] ${utterance}`);
             llmStart = Date.now();
-            promptLLM(mediaStream, utterance); // Send the final transcript to OpenAI for response
+            total_transcript+="\nCaller: "+utterance
+            promptLLM(mediaStream, total_transcript); // Send the final transcript to OpenAI for response
           } else {
             console.log(`deepgram STT:  [Is Final] ${transcript}`);
           }
@@ -323,7 +361,8 @@ const setupDeepgram = (mediaStream) => {
         is_finals = [];
         console.log(`deepgram STT: [Speech Final] ${utterance}`);
         llmStart = Date.now();
-        promptLLM(mediaStream, utterance);
+        total_transcript+="\nCaller: "+utterance
+        promptLLM(mediaStream, total_transcript); // Send the final transcript to OpenAI for response
       }
     });
 
@@ -345,6 +384,7 @@ const setupDeepgram = (mediaStream) => {
 
     deepgram.addListener(LiveTranscriptionEvents.Metadata, (data) => {
       console.log("deepgram STT: metadata received:", data);
+
     });
   });
 
@@ -354,3 +394,4 @@ const setupDeepgram = (mediaStream) => {
 wsserver.listen(HTTP_SERVER_PORT, function () {
   console.log("Server listening on: http://localhost:%s", HTTP_SERVER_PORT);
 });
+

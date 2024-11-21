@@ -15,9 +15,9 @@
   "dependencies": {
     "@deepgram/sdk": "^3.4.4",
     "dotenv": "^16.4.5",
-    "httpdispatcher": "^2.1.2",
+    "httpdispatcher": "^2.2.0",
     "node-fetch": "^2.7.0",
     "openai": "^4.52.7",
-    "websocket": "^1.0.28"
+    "websocket": "^1.0.35"
   }
 }

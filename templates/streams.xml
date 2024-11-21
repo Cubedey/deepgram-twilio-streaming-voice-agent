@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <Response>
-  <Say>Speak now.</Say>
+<Say voice="Google.en-US-Neural2-C">"Your call is being monitored for quality assurance purposes."</Say>
   <Connect>
-    <Stream url="wss://<YOUR NGROK URL>/streams">
+    <Stream url="wss://0747-128-237-82-205.ngrok-free.app/streams">
       <Parameter name="aCustomParameter" value="aCustomValue that was set in TwiML" />
     </Stream>
   </Connect>
-  <Say>Goodbye.</Say>
+
 </Response>
